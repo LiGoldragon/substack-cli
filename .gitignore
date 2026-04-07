@@ -1,0 +1,10 @@
+/target
+.direnv/
+result
+\#*\#
+.\#*
+*~
+.*.swp
+.mcp.json
+*.db
+node_modules/
