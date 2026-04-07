@@ -354,6 +354,21 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
             if (!updateResponse.ok) {
                 throw new Error(`Failed to update draft: ${updateResponse.statusText}`);
             }
+            // Step 6: Publish if not draft
+            if (!draft) {
+                const publishResponse = await fetch(`https://${process.env.SUBSTACK_HOSTNAME}/api/v1/drafts/${postId}/publish`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cookie': `connect.sid=${apiKey}`
+                    },
+                    body: JSON.stringify({})
+                });
+                if (!publishResponse.ok) {
+                    const errText = await publishResponse.text();
+                    throw new Error(`Failed to publish post: ${publishResponse.statusText} - ${errText}`);
+                }
+            }
             return { content: [{ type: "text", text: JSON.stringify({
                             success: true,
                             post_id: postId,
@@ -361,7 +376,7 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                             cover_image_url: coverImageUrl,
                             draft: draft,
                             message: draft ? "Draft post created successfully" : "Post published successfully",
-                            url: `https://${process.env.SUBSTACK_HOSTNAME}/publish/post/${postId}`
+                            url: `https://${process.env.SUBSTACK_HOSTNAME}/${draft ? 'publish/post/' : 'p/'}${draft ? postId : title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
                         }, null, 2) }] };
         }
         throw new Error("Unknown tool: " + name);
