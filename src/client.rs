@@ -56,6 +56,8 @@ impl Client {
 
         let http = reqwest::Client::builder()
             .default_headers(headers)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("failed to build HTTP client");
 
