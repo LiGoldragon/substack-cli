@@ -252,27 +252,22 @@ fn markdown_to_prosemirror(md: &str) -> serde_json::Value {
     serde_json::json!({ "type": "doc", "content": content })
 }
 
-/// Parse inline markdown: **bold**, *italic*, ***bold+italic***.
+/// Parse inline markdown: **bold**, *italic*.
 fn inline_nodes(text: &str) -> Vec<serde_json::Value> {
     let mut nodes = Vec::new();
     let mut current = String::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
     let mut i = 0;
 
-    while i < len {
-        if chars[i] == '*' {
-            // count consecutive asterisks
+    while i < text.len() {
+        if text.as_bytes()[i] == b'*' {
             let start = i;
-            while i < len && chars[i] == '*' {
+            while i < text.len() && text.as_bytes()[i] == b'*' {
                 i += 1;
             }
             let stars = i - start;
-
-            // find matching closing
             let pattern: String = std::iter::repeat('*').take(stars).collect();
+
             if let Some(end) = text[i..].find(&pattern) {
-                // flush current text
                 if !current.is_empty() {
                     nodes.push(serde_json::json!({
                         "type": "text", "text": current
@@ -295,14 +290,14 @@ fn inline_nodes(text: &str) -> Vec<serde_json::Value> {
                     node["marks"] = serde_json::Value::Array(marks);
                 }
                 nodes.push(node);
-
                 i += end + stars;
             } else {
                 current.push_str(&pattern);
             }
         } else {
-            current.push(chars[i]);
-            i += 1;
+            let ch = text[i..].chars().next().unwrap();
+            current.push(ch);
+            i += ch.len_utf8();
         }
     }
 
