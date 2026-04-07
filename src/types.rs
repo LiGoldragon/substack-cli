@@ -127,6 +127,8 @@ pub struct DraftUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draft_subtitle: Option<String>,
     pub draft_body: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_image: Option<String>,
 }
 
 // ── Published ────────────────────────────────────────────────────

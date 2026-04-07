@@ -27,6 +27,9 @@ pub struct CreatePostParams {
     /// Path to a markdown file (mutually exclusive with body)
     #[serde(default)]
     pub file_path: Option<String>,
+    /// Path to a cover image file (optional, uploaded to Substack CDN)
+    #[serde(default)]
+    pub cover_image: Option<String>,
     /// Save as draft only (default: false)
     #[serde(default)]
     pub draft: Option<bool>,
@@ -306,6 +309,16 @@ impl Server {
         let doc = prosemirror::from_markdown(&body);
         let draft = params.draft.unwrap_or(false);
 
+        let cover_image_url = match &params.cover_image {
+            Some(path) => {
+                let data_uri = image_to_data_uri(path)?;
+                let upload = self.client.upload_image(&data_uri, None).await
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+                Some(upload.url)
+            }
+            None => None,
+        };
+
         let user_id = self.client.user_id().await?;
         let d = self.client.create_draft(user_id).await?;
 
@@ -313,6 +326,7 @@ impl Server {
             draft_title: title.clone(),
             draft_subtitle: subtitle,
             draft_body: serde_json::to_string(&doc)?,
+            cover_image: cover_image_url,
         };
         self.client.update_draft(&d.id, &update).await?;
 
