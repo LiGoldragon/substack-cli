@@ -229,16 +229,23 @@ fn markdown_to_prosemirror(md: &str) -> serde_json::Value {
                 "content": inline_nodes(h.trim())
             }));
         } else if block.starts_with("> ") {
-            let quote_text = block
+            let lines: Vec<&str> = block
                 .lines()
                 .map(|l| l.strip_prefix("> ").unwrap_or(l))
-                .collect::<Vec<_>>()
-                .join("\n");
+                .collect();
+            let mut para_content = Vec::new();
+            for (i, line) in lines.iter().enumerate() {
+                let line = line.strip_suffix('\\').unwrap_or(line).trim();
+                para_content.extend(inline_nodes(line));
+                if i < lines.len() - 1 {
+                    para_content.push(serde_json::json!({ "type": "hardBreak" }));
+                }
+            }
             content.push(serde_json::json!({
                 "type": "blockquote",
                 "content": [{
                     "type": "paragraph",
-                    "content": inline_nodes(&quote_text)
+                    "content": para_content
                 }]
             }));
         } else {
