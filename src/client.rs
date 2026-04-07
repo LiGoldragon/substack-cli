@@ -1,48 +1,11 @@
 use reqwest::header;
-use serde::{Deserialize, Serialize};
+
+use crate::error::Error;
+use crate::types::*;
 
 pub struct Client {
     http: reqwest::Client,
     base: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PubUser {
-    pub user_id: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PubUsersResponse {
-    pub pub_users: Vec<PubUser>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Draft {
-    pub id: u64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DraftUpdate {
-    pub draft_title: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub draft_subtitle: Option<String>,
-    pub draft_body: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PublishedPost {
-    #[serde(default)]
-    pub slug: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ProfileResponse {
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub handle: Option<String>,
-    #[serde(default)]
-    pub bio: Option<String>,
 }
 
 impl Client {
@@ -67,100 +30,148 @@ impl Client {
         }
     }
 
-    pub async fn user_id(&self) -> Result<u64, Error> {
-        let resp: PubUsersResponse = self
-            .http
-            .get(format!("{}/api/v1/publication_user", self.base))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+    // ── Publication ──────────────────────────────────────────────
 
+    pub async fn publication(&self) -> Result<Publication, Error> {
+        Ok(self.get("/api/v1/publication").await?)
+    }
+
+    pub async fn update_publication(
+        &self,
+        update: &PublicationUpdate,
+    ) -> Result<Publication, Error> {
+        Ok(self.put("/api/v1/publication", update).await?)
+    }
+
+    // ── User ─────────────────────────────────────────────────────
+
+    pub async fn user_id(&self) -> Result<u64, Error> {
+        let resp: PubUsersResponse = self.get("/api/v1/publication_user").await?;
         resp.pub_users
             .first()
             .map(|u| u.user_id)
             .ok_or(Error::NoUser)
     }
 
-    pub async fn create_draft(&self, user_id: u64) -> Result<Draft, Error> {
-        let draft: Draft = self
-            .http
-            .post(format!("{}/api/v1/drafts", self.base))
-            .json(&serde_json::json!({
-                "draft_bylines": [{ "id": user_id, "user_id": user_id }]
-            }))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+    // ── Drafts / Posts ───────────────────────────────────────────
 
-        Ok(draft)
+    pub async fn create_draft(&self, user_id: u64) -> Result<Draft, Error> {
+        let body = DraftCreate {
+            draft_bylines: vec![DraftByline {
+                id: user_id,
+                user_id,
+            }],
+        };
+        Ok(self.post("/api/v1/drafts", &body).await?)
     }
 
     pub async fn update_draft(
         &self,
-        draft_id: u64,
+        draft_id: &PostId,
         update: &DraftUpdate,
     ) -> Result<(), Error> {
-        self.http
-            .put(format!("{}/api/v1/drafts/{draft_id}", self.base))
+        let path = format!("/api/v1/drafts/{}", draft_id.0);
+        let resp = self
+            .http
+            .put(format!("{}{path}", self.base))
             .json(update)
             .send()
-            .await?
-            .error_for_status()?;
-
+            .await?;
+        Self::check(resp).await?;
         Ok(())
     }
 
-    pub async fn publish(&self, draft_id: u64) -> Result<PublishedPost, Error> {
-        let post: PublishedPost = self
-            .http
-            .post(format!("{}/api/v1/drafts/{draft_id}/publish", self.base))
-            .json(&serde_json::json!({}))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        Ok(post)
+    pub async fn publish(&self, draft_id: &PostId) -> Result<Published, Error> {
+        let path = format!("/api/v1/drafts/{}/publish", draft_id.0);
+        Ok(self.post(&path, &serde_json::json!({})).await?)
     }
 
-    pub async fn profile(&self) -> Result<ProfileResponse, Error> {
-        let resp: ProfileResponse = self
-            .http
-            .get(format!("{}/api/v1/subscriber/profile", self.base))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-
-        Ok(resp)
+    pub async fn list_posts(&self, limit: u32) -> Result<Vec<Post>, Error> {
+        let path = format!("/api/v1/archive?sort=new&limit={limit}");
+        Ok(self.get(&path).await?)
     }
-}
 
-#[derive(Debug)]
-pub enum Error {
-    Http(reqwest::Error),
-    NoUser,
-}
+    pub async fn get_post(&self, post_id: &PostId) -> Result<PostFull, Error> {
+        let path = format!("/api/v1/posts/{}", post_id.0);
+        Ok(self.get(&path).await?)
+    }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Http(e) => write!(f, "{e}"),
-            Self::NoUser => write!(f, "no publication user found"),
+    pub async fn delete_post(&self, post_id: &PostId) -> Result<(), Error> {
+        let path = format!("/api/v1/drafts/{}", post_id.0);
+        let resp = self
+            .http
+            .delete(format!("{}{path}", self.base))
+            .send()
+            .await?;
+        Self::check(resp).await?;
+        Ok(())
+    }
+
+    // ── Image ────────────────────────────────────────────────────
+
+    pub async fn upload_image(
+        &self,
+        data_uri: &str,
+        post_id: Option<&PostId>,
+    ) -> Result<ImageUpload, Error> {
+        let mut body = serde_json::json!({ "image": data_uri });
+        if let Some(pid) = post_id {
+            body["postId"] = serde_json::json!(pid.0);
         }
+        Ok(self.post("/api/v1/image", &body).await?)
     }
-}
 
-impl std::error::Error for Error {}
+    // ── HTTP helpers ─────────────────────────────────────────────
 
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Http(e)
+    async fn get<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, Error> {
+        let resp = self
+            .http
+            .get(format!("{}{path}", self.base))
+            .send()
+            .await?;
+        let resp = Self::check(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    async fn post<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, Error> {
+        let resp = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .json(body)
+            .send()
+            .await?;
+        let resp = Self::check(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    async fn put<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, Error> {
+        let resp = self
+            .http
+            .put(format!("{}{path}", self.base))
+            .json(body)
+            .send()
+            .await?;
+        let resp = Self::check(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    async fn check(resp: reqwest::Response) -> Result<reqwest::Response, Error> {
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::Api(status.as_u16(), body));
+        }
+        Ok(resp)
     }
 }

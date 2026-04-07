@@ -1,5 +1,8 @@
 mod client;
+mod error;
 mod mcp;
+mod prosemirror;
+mod types;
 
 use std::sync::Arc;
 
@@ -21,7 +24,8 @@ async fn main() {
     let client = Arc::new(client::Client::new(&hostname, &api_key));
     let server = mcp::Server::new(client);
 
-    let service = rmcp::ServiceExt::serve(server, rmcp::transport::stdio()).await
+    let service = rmcp::ServiceExt::serve(server, rmcp::transport::stdio())
+        .await
         .expect("failed to start MCP server");
 
     let _ = service.waiting().await;
