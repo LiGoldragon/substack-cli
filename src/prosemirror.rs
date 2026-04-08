@@ -17,7 +17,7 @@ pub fn from_markdown(md: &str) -> Value {
         } else if block.starts_with("> ") {
             content.push(blockquote(block));
         } else {
-            content.push(paragraph(&block.replace('\n', " ")));
+            content.push(paragraph(block));
         }
     }
 
