@@ -32,11 +32,30 @@ fn heading(level: u8, text: &str) -> Value {
     })
 }
 
-fn paragraph(text: &str) -> Value {
-    serde_json::json!({
-        "type": "paragraph",
-        "content": inline_nodes(text)
-    })
+fn paragraph(block: &str) -> Value {
+    let lines: Vec<&str> = block.lines().collect();
+    let has_breaks = lines.iter().any(|l| l.ends_with('\\'));
+
+    if has_breaks {
+        let mut para_content = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            let line = line.strip_suffix('\\').unwrap_or(line).trim();
+            para_content.extend(inline_nodes(line));
+            if i < lines.len() - 1 {
+                para_content.push(serde_json::json!({ "type": "hardBreak" }));
+            }
+        }
+        serde_json::json!({
+            "type": "paragraph",
+            "content": para_content
+        })
+    } else {
+        let text = block.replace('\n', " ");
+        serde_json::json!({
+            "type": "paragraph",
+            "content": inline_nodes(&text)
+        })
+    }
 }
 
 fn blockquote(block: &str) -> Value {
