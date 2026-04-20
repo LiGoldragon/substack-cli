@@ -65,11 +65,7 @@ impl Client {
         Ok(self.post("/api/v1/drafts", &body).await?)
     }
 
-    pub async fn update_draft(
-        &self,
-        draft_id: &PostId,
-        update: &DraftUpdate,
-    ) -> Result<(), Error> {
+    pub async fn update_draft(&self, draft_id: &PostId, update: &DraftUpdate) -> Result<(), Error> {
         let path = format!("/api/v1/drafts/{}", draft_id.0);
         let resp = self
             .http
@@ -123,15 +119,8 @@ impl Client {
 
     // ── HTTP helpers ─────────────────────────────────────────────
 
-    async fn get<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> Result<T, Error> {
-        let resp = self
-            .http
-            .get(format!("{}{path}", self.base))
-            .send()
-            .await?;
+    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, Error> {
+        let resp = self.http.get(format!("{}{path}", self.base)).send().await?;
         let resp = Self::check(resp).await?;
         Ok(resp.json().await?)
     }

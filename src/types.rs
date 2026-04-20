@@ -3,13 +3,7 @@ use serde::{Deserialize, Serialize};
 // ── Identity ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserId(pub u64);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostId(pub u64);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PublicationId(pub u64);
 
 // ── Publication ──────────────────────────────────────────────────
 
@@ -55,16 +49,6 @@ pub struct PublicationUpdate {
     pub theme_var_background_pop: Option<String>,
 }
 
-// ── Profile ──────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Profile {
-    pub name: Option<String>,
-    pub handle: Option<String>,
-    pub bio: Option<String>,
-    pub photo_url: Option<String>,
-}
-
 // ── Post ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,8 +90,6 @@ pub struct PostSummary {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Draft {
     pub id: PostId,
-    #[serde(default)]
-    pub slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -141,36 +123,9 @@ pub struct Published {
 
 // ── Image ────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImagePurpose {
-    Logo,
-    Cover,
-    Banner,
-    Post,
-}
-
-impl ImagePurpose {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "logo" => Some(Self::Logo),
-            "cover" => Some(Self::Cover),
-            "banner" => Some(Self::Banner),
-            "post" => Some(Self::Post),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageUpload {
     pub url: String,
-}
-
-// ── Note ─────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Note {
-    pub id: u64,
 }
 
 // ── Internal API shapes ──────────────────────────────────────────
