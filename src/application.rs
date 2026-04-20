@@ -197,10 +197,13 @@ impl Application {
         };
 
         self.client.update_draft(&post_id, &update).await?;
+        let post = self.client.publish(&post_id).await?;
+        let slug = post.slug.unwrap_or_default();
         println!(
             "Updated post {}: {}",
             arguments.post_id, prepared_post.title
         );
+        println!("https://{}/p/{slug}", self.hostname);
         Ok(())
     }
 
