@@ -22,6 +22,7 @@ settings.
 - `substack publication set-email-banner --file <path>`
 - `substack image upload --file <path>`
 - `substack post create (--body <markdown> | --file-path <path>)`
+- `substack post update <post-id> (--body <markdown> | --file-path <path>)`
 - `substack post list`
 - `substack post get <post-id> [--full] [--save-html <path>] [--save-json <path>]`
 - `substack post delete <post-id>`

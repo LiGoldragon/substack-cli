@@ -96,6 +96,7 @@ pub struct ImageUploadArguments {
 #[derive(Debug, Subcommand)]
 pub enum PostCommand {
     Create(PostCreateArguments),
+    Update(PostUpdateArguments),
     List(PostListArguments),
     Get(PostGetArguments),
     Delete(PostDeleteArguments),
@@ -115,6 +116,21 @@ pub struct PostCreateArguments {
     pub cover_image: Option<String>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub draft: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PostUpdateArguments {
+    pub post_id: u64,
+    #[arg(long)]
+    pub title: Option<String>,
+    #[arg(long)]
+    pub subtitle: Option<String>,
+    #[arg(long, conflicts_with = "file_path")]
+    pub body: Option<String>,
+    #[arg(long)]
+    pub file_path: Option<String>,
+    #[arg(long)]
+    pub cover_image: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -181,6 +197,27 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_post_update() {
+        let command_line = CommandLine::try_parse_from([
+            "substack",
+            "post",
+            "update",
+            "42",
+            "--file-path",
+            "post.md",
+        ])
+        .unwrap();
+
+        match command_line.command {
+            RootCommand::Post(PostCommand::Update(arguments)) => {
+                assert_eq!(arguments.post_id, 42);
+                assert_eq!(arguments.file_path.as_deref(), Some("post.md"));
+            }
+            _ => panic!("expected post update command"),
+        }
     }
 
     #[test]

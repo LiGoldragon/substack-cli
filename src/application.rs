@@ -1,13 +1,14 @@
 use crate::cli::{
     CommandLine, ImageCommand, ImageUploadArguments, PostCommand, PostCreateArguments,
-    PostDeleteArguments, PostGetArguments, PostListArguments, PublicationCommand,
-    PublicationImageArguments, PublicationUpdateArguments, RootCommand,
+    PostDeleteArguments, PostGetArguments, PostListArguments, PostUpdateArguments,
+    PublicationCommand, PublicationImageArguments, PublicationUpdateArguments, RootCommand,
 };
 use crate::client::Client;
 use crate::error::Error;
 use crate::image_file::ImageFile;
 use crate::prosemirror;
 use crate::types::{DraftUpdate, ImageUpload, PostId, PostSummary, Publication, PublicationUpdate};
+use serde_json::Value;
 
 pub struct ApplicationConfig {
     hostname: String,
@@ -134,6 +135,7 @@ impl Application {
     async fn run_post(&self, command: PostCommand) -> Result<(), Error> {
         match command {
             PostCommand::Create(arguments) => self.create_post(arguments).await,
+            PostCommand::Update(arguments) => self.update_post(arguments).await,
             PostCommand::List(arguments) => self.list_posts(arguments).await,
             PostCommand::Get(arguments) => self.get_post(arguments).await,
             PostCommand::Delete(arguments) => self.delete_post(arguments).await,
@@ -142,49 +144,107 @@ impl Application {
 
     async fn create_post(&self, arguments: PostCreateArguments) -> Result<(), Error> {
         let raw = self.read_post_body(&arguments)?;
-        let (frontmatter, body) = prosemirror::strip_frontmatter(&raw);
-
-        let title = arguments
-            .title
-            .or_else(|| prosemirror::frontmatter_field(&frontmatter, "title"))
-            .or_else(|| prosemirror::extract_first_heading(&body))
-            .unwrap_or_else(|| "Untitled".into());
-
-        let subtitle = arguments
-            .subtitle
-            .or_else(|| prosemirror::frontmatter_field(&frontmatter, "subtitle"));
-
-        let body = prosemirror::strip_leading_heading(&body, &title);
-        let doc = prosemirror::from_markdown(&body);
-        let cover_image_url = match &arguments.cover_image {
-            Some(path) => Some(self.upload_image_path(path).await?.url),
-            None => None,
-        };
+        let draft_only = arguments.draft;
+        let prepared_post = self
+            .prepare_post(
+                arguments.title,
+                arguments.subtitle,
+                raw,
+                arguments.cover_image.as_deref(),
+            )
+            .await?;
 
         let user_id = self.client.user_id().await?;
         let draft = self.client.create_draft(user_id).await?;
         let update = DraftUpdate {
-            draft_title: title.clone(),
-            draft_subtitle: subtitle,
-            draft_body: serde_json::to_string(&doc)?,
-            cover_image: cover_image_url,
+            draft_title: prepared_post.title.clone(),
+            draft_subtitle: prepared_post.subtitle,
+            draft_body: serde_json::to_string(&prepared_post.body)?,
+            cover_image: prepared_post.cover_image_url,
         };
 
         self.client.update_draft(&draft.id, &update).await?;
 
-        if arguments.draft {
-            println!("Draft saved: {title} (id: {})", draft.id.0);
+        if draft_only {
+            println!("Draft saved: {} (id: {})", prepared_post.title, draft.id.0);
         } else {
             let post = self.client.publish(&draft.id).await?;
             let slug = post.slug.unwrap_or_default();
-            println!("Published: {title}");
+            println!("Published: {}", prepared_post.title);
             println!("https://{}/p/{slug}", self.hostname);
         }
 
         Ok(())
     }
 
+    async fn update_post(&self, arguments: PostUpdateArguments) -> Result<(), Error> {
+        let raw = self.read_post_update_body(&arguments)?;
+        let prepared_post = self
+            .prepare_post(
+                arguments.title,
+                arguments.subtitle,
+                raw,
+                arguments.cover_image.as_deref(),
+            )
+            .await?;
+
+        let post_id = PostId(arguments.post_id);
+        let update = DraftUpdate {
+            draft_title: prepared_post.title.clone(),
+            draft_subtitle: prepared_post.subtitle,
+            draft_body: serde_json::to_string(&prepared_post.body)?,
+            cover_image: prepared_post.cover_image_url,
+        };
+
+        self.client.update_draft(&post_id, &update).await?;
+        println!(
+            "Updated post {}: {}",
+            arguments.post_id, prepared_post.title
+        );
+        Ok(())
+    }
+
+    async fn prepare_post(
+        &self,
+        title: Option<String>,
+        subtitle: Option<String>,
+        raw: String,
+        cover_image: Option<&str>,
+    ) -> Result<PreparedPost, Error> {
+        let (frontmatter, body) = prosemirror::strip_frontmatter(&raw);
+        let title = title
+            .or_else(|| prosemirror::frontmatter_field(&frontmatter, "title"))
+            .or_else(|| prosemirror::extract_first_heading(&body))
+            .unwrap_or_else(|| "Untitled".into());
+        let subtitle =
+            subtitle.or_else(|| prosemirror::frontmatter_field(&frontmatter, "subtitle"));
+        let body = prosemirror::strip_leading_heading(&body, &title);
+        let body = prosemirror::from_markdown(&body);
+        let cover_image_url = match cover_image {
+            Some(path) => Some(self.upload_image_path(path).await?.url),
+            None => None,
+        };
+
+        Ok(PreparedPost {
+            title,
+            subtitle,
+            body,
+            cover_image_url,
+        })
+    }
+
     fn read_post_body(&self, arguments: &PostCreateArguments) -> Result<String, Error> {
+        match (&arguments.body, &arguments.file_path) {
+            (Some(body), None) => Ok(body.clone()),
+            (None, Some(path)) => Ok(std::fs::read_to_string(path)?),
+            (Some(_), Some(_)) => Err(Error::Usage(
+                "provide --body or --file-path, not both".into(),
+            )),
+            (None, None) => Err(Error::Usage("--body or --file-path is required".into())),
+        }
+    }
+
+    fn read_post_update_body(&self, arguments: &PostUpdateArguments) -> Result<String, Error> {
         match (&arguments.body, &arguments.file_path) {
             (Some(body), None) => Ok(body.clone()),
             (None, Some(path)) => Ok(std::fs::read_to_string(path)?),
@@ -285,4 +345,11 @@ struct PublicationImageUpdate {
 struct SavedFile {
     kind: &'static str,
     path: String,
+}
+
+struct PreparedPost {
+    title: String,
+    subtitle: Option<String>,
+    body: Value,
+    cover_image_url: Option<String>,
 }
