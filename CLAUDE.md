@@ -26,4 +26,6 @@ settings.
 - `substack post get <post-id> [--full] [--save-html <path>] [--save-json <path>]`
 - `substack post delete <post-id>`
 
-Authentication comes from `SUBSTACK_HOSTNAME` and `SUBSTACK_API_KEY`.
+The default flake app wraps `substack` and injects `SUBSTACK_API_KEY` plus
+`SUBSTACK_HOSTNAME` from `gopass show -o substack.com/api-key`. The unwrapped
+binary still accepts those environment variables directly.

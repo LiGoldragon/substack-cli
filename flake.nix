@@ -20,14 +20,37 @@
         src = craneLib.cleanCargoSource ./.;
         commonArgs = { inherit src; pname = "substack-cli"; };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-      in
-      {
-        packages.default = craneLib.buildPackage (commonArgs // {
+        substack-cli-unwrapped = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+        substack-cli = pkgs.writeShellScriptBin "substack" ''
+          set -euo pipefail
+
+          export SUBSTACK_API_KEY="''${SUBSTACK_API_KEY:-$(${pkgs.gopass}/bin/gopass show -o substack.com/api-key)}"
+
+          if [ -z "''${SUBSTACK_HOSTNAME:-}" ]; then
+            pub_url="$(${pkgs.gopass}/bin/gopass show -o substack.com/api-key publication-url)"
+            pub_url="''${pub_url#https://}"
+            pub_url="''${pub_url#http://}"
+            export SUBSTACK_HOSTNAME="''${pub_url%/}"
+          fi
+
+          exec ${substack-cli-unwrapped}/bin/substack "$@"
+        '';
+      in
+      {
+        packages = {
+          default = substack-cli;
+          unwrapped = substack-cli-unwrapped;
+        };
+
+        apps.default = {
+          type = "app";
+          program = "${substack-cli}/bin/substack";
+        };
 
         devShells.default = craneLib.devShell {
-          packages = [ pkgs.rust-analyzer pkgs.jujutsu ];
+          packages = [ pkgs.rust-analyzer pkgs.jujutsu pkgs.gopass ];
         };
       }
     );
