@@ -59,15 +59,14 @@ fn paragraph(block: &str) -> Value {
 }
 
 fn blockquote(block: &str) -> Value {
-    let lines: Vec<&str> = block
-        .lines()
-        .map(|l| l.strip_prefix("> ").unwrap_or(l))
-        .collect();
+    let lines: Vec<&str> = block.lines().map(strip_blockquote_marker).collect();
 
     let mut para_content = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let line = line.strip_suffix('\\').unwrap_or(line).trim();
-        para_content.extend(inline_nodes(line));
+        if !line.is_empty() {
+            para_content.extend(inline_nodes(line));
+        }
         if i < lines.len() - 1 {
             para_content.push(serde_json::json!({ "type": "hardBreak" }));
         }
@@ -80,6 +79,14 @@ fn blockquote(block: &str) -> Value {
             "content": para_content
         }]
     })
+}
+
+fn strip_blockquote_marker(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    while let Some(next) = rest.strip_prefix('>') {
+        rest = next.trim_start();
+    }
+    rest
 }
 
 /// Parse inline markdown: **bold**, *italic*.
@@ -196,4 +203,26 @@ pub fn strip_leading_heading(text: &str, title: &str) -> String {
         }
     }
     text.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blockquote_spacer_lines_do_not_render_literal_markers() {
+        let doc = from_markdown("> first\n> >\n> second");
+        let content = doc["content"].as_array().unwrap();
+        let quote = &content[0]["content"][0]["content"];
+
+        assert_eq!(
+            quote,
+            &serde_json::json!([
+                { "type": "text", "text": "first" },
+                { "type": "hardBreak" },
+                { "type": "hardBreak" },
+                { "type": "text", "text": "second" }
+            ])
+        );
+    }
 }
