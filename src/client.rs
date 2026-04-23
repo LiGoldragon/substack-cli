@@ -88,7 +88,7 @@ impl Client {
     }
 
     pub async fn get_post(&self, post_id: &PostId) -> Result<PostFull, Error> {
-        let path = format!("/api/v1/posts/{}", post_id.0);
+        let path = format!("/api/v1/drafts/{}", post_id.0);
         Ok(self.get(&path).await?)
     }
 

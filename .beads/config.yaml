@@ -53,6 +53,8 @@
 # - github.org
 # - github.repo
 
-sync.remote: "git+ssh://git@github.com/LiGoldragon/substack-cli.git"
+sync.remote: "git@github.com:LiGoldragon/substack-cli.git"
 
-dolt.shared-server: true
+dolt.shared-server: false
+
+export.auto: false
