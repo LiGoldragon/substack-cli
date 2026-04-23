@@ -17,7 +17,13 @@
         pkgs = import nixpkgs { inherit system; };
         rustToolchain = fenix.packages.${system}.latest.toolchain;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-        src = craneLib.cleanCargoSource ./.;
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            (builtins.match ".*/assets/.*\\.ttf$" path != null)
+            || (craneLib.filterCargoSources path type);
+          name = "source";
+        };
         commonArgs = { inherit src; pname = "substack-cli"; };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         substack-cli-unwrapped = craneLib.buildPackage (commonArgs // {

@@ -1,48 +1,34 @@
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
-    Http(reqwest::Error),
-    Io(std::io::Error),
-    Json(serde_json::Error),
+    #[error("{0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("{0}")]
     Usage(String),
+
+    #[error("{variable} must be set")]
+    MissingEnvironmentVariable { variable: &'static str },
+
+    #[error("{0}")]
     UnexpectedResponse(String),
+
+    #[error("no publication user found")]
     NoUser,
+
+    #[error("invalid image: {0}")]
     InvalidImage(String),
-    Api(u16, String),
-}
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Http(e) => write!(f, "{e}"),
-            Self::Io(e) => write!(f, "{e}"),
-            Self::Json(e) => write!(f, "{e}"),
-            Self::Usage(msg) => write!(f, "{msg}"),
-            Self::UnexpectedResponse(msg) => write!(f, "{msg}"),
-            Self::NoUser => write!(f, "no publication user found"),
-            Self::InvalidImage(msg) => write!(f, "invalid image: {msg}"),
-            Self::Api(status, body) => write!(f, "API {status}: {body}"),
-        }
-    }
-}
+    #[error("unsupported image format: {extension}")]
+    UnsupportedImageFormat { extension: String },
 
-impl std::error::Error for Error {}
-
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Http(e)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
+    #[error("API {status}: {body}")]
+    Api { status: u16, body: String },
 }
