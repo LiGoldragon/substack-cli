@@ -311,6 +311,10 @@ impl Application {
             .or_else(|| body.first_heading())
             .unwrap_or_else(|| "Untitled".into());
         let subtitle = subtitle.or_else(|| frontmatter.as_ref().and_then(|f| f.field("subtitle")));
+        let manifest_banner_image = match (cover_image.as_deref(), source.file_path.as_deref()) {
+            (Some(_), _) | (_, None) => None,
+            (None, Some(source_path)) => manifest.banner_image_path(source_path)?,
+        };
 
         let body = body.without_leading_heading(&title);
         let body = self.render_and_upload_tables(body.as_str()).await?;
@@ -330,6 +334,10 @@ impl Application {
 
         let cover_image_url = match cover_image {
             Some(path) => Some(self.upload_image_path(&path).await?.url),
+            None if manifest_banner_image.is_some() => {
+                let path = manifest_banner_image.unwrap();
+                Some(self.upload_image_path(&path.to_string_lossy()).await?.url)
+            }
             None => None,
         };
 

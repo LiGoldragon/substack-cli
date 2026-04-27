@@ -150,6 +150,10 @@ Behavior:
 - Pass `--publish-linked-files` to publish missing local `.md` dependencies
   first, record them in the manifest, and then rewrite the links to their
   canonical Substack URLs.
+- If `--cover-image` is not supplied and the source file has a `banner_image`
+  entry in the manifest, that banner image is uploaded and used as the post
+  cover image automatically. This also applies to linked files published
+  through `--publish-linked-files`.
 
 Manifest shape:
 
@@ -159,7 +163,12 @@ Manifest shape:
     {
       "source_path": "water/Keep_the_Plasma.md",
       "post_id": 195628661,
-      "slug": "keep-the-plasma"
+      "slug": "keep-the-plasma",
+      "banner_image": "generated-images/keep-the-plasma-banner.png"
+    },
+    {
+      "source_path": "water/The_Distilled_Water_Paradox.md",
+      "banner_image": "generated-images/the-distilled-water-paradox-banner.png"
     }
   ]
 }

@@ -14,7 +14,11 @@ impl LocalPostManifest {
         self.posts
             .iter()
             .find(|post| post.source_path == *source_path)
-            .map(LocalPostRecord::published_post)
+            .and_then(LocalPostRecord::published_post)
+    }
+
+    fn find_record(&self, source_path: &SourcePath) -> Option<&LocalPostRecord> {
+        self.posts.iter().find(|post| post.source_path == *source_path)
     }
 
     fn upsert(&mut self, record: LocalPostRecord) {
@@ -23,7 +27,7 @@ impl LocalPostManifest {
             .iter_mut()
             .find(|post| post.source_path == record.source_path)
         {
-            *existing = record;
+            existing.merge(record);
             return;
         }
         self.posts.push(record);
@@ -34,15 +38,31 @@ impl LocalPostManifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LocalPostRecord {
     source_path: SourcePath,
-    post_id: PostId,
-    slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    post_id: Option<PostId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    banner_image: Option<SourcePath>,
 }
 
 impl LocalPostRecord {
-    fn published_post(&self) -> PublishedLocalPost {
-        PublishedLocalPost {
-            post_id: self.post_id.clone(),
-            slug: self.slug.clone(),
+    fn published_post(&self) -> Option<PublishedLocalPost> {
+        Some(PublishedLocalPost {
+            post_id: self.post_id.clone()?,
+            slug: self.slug.clone()?,
+        })
+    }
+
+    fn merge(&mut self, update: LocalPostRecord) {
+        if let Some(post_id) = update.post_id {
+            self.post_id = Some(post_id);
+        }
+        if let Some(slug) = update.slug {
+            self.slug = Some(slug);
+        }
+        if let Some(banner_image) = update.banner_image {
+            self.banner_image = Some(banner_image);
         }
     }
 }
@@ -142,12 +162,41 @@ impl LocalPostManifestFile {
         let source_path = self.source_path(source_path)?;
         let record = LocalPostRecord {
             source_path,
-            post_id,
-            slug,
+            post_id: Some(post_id),
+            slug: Some(slug),
+            banner_image: None,
         };
-        let published_post = record.published_post();
+        let published_post = record.published_post().expect("published post");
         self.manifest.upsert(record);
         Ok(published_post)
+    }
+
+    pub fn record_banner_image(
+        &mut self,
+        source_path: &Path,
+        banner_image: &Path,
+    ) -> Result<(), Error> {
+        let source_path = self.source_path(source_path)?;
+        let banner_image = self.source_path(banner_image)?;
+        let record = LocalPostRecord {
+            source_path,
+            post_id: None,
+            slug: None,
+            banner_image: Some(banner_image),
+        };
+        self.manifest.upsert(record);
+        Ok(())
+    }
+
+    pub fn banner_image_path(&self, source_path: &Path) -> Result<Option<PathBuf>, Error> {
+        let source_path = self.source_path(source_path)?;
+        let Some(record) = self.manifest.find_record(&source_path) else {
+            return Ok(None);
+        };
+        let Some(banner_image) = record.banner_image.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some(self.manifest_root()?.join(banner_image.as_str())))
     }
 
     pub fn save(&self) -> Result<(), Error> {
