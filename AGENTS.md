@@ -4,7 +4,7 @@ See also [CLAUDE.md](./CLAUDE.md) for the CLI contract and workflow rules.
 
 ## Rust style
 
-Follow [~/git/tools-documentation/rust/style.md](../tools-documentation/rust/style.md). Summary of what must be preserved in this crate:
+Follow [~/git/lore/rust/style.md](../lore/rust/style.md). Summary of what must be preserved in this crate:
 
 - **Methods on types, not free functions.** `main` is the only free function in a binary crate. `prosemirror::from_markdown` and friends are current exceptions — any new behavior goes on a type (e.g. a `Markdown` or `ProseMirrorDoc` struct), not as a free `pub fn`.
 - **Domain values are newtypes.** `PostId(u64)` is the pattern. A URL returned from the image upload is a candidate for a newtype, not a bare `String`.
@@ -17,9 +17,9 @@ Follow [~/git/tools-documentation/rust/style.md](../tools-documentation/rust/sty
 
 ## Tool docs
 
-Tool usage references live at [~/git/tools-documentation/](../tools-documentation/):
+Tool usage references live at [~/git/lore/](../lore/):
 
-- [rust/style.md](../tools-documentation/rust/style.md) — Rust object style (authoritative for this crate).
-- [substack/basic-usage.md](../tools-documentation/substack/basic-usage.md) — our own CLI's user-facing surface.
-- [jj/basic-usage.md](../tools-documentation/jj/basic-usage.md) — VCS loop (this repo uses `jj`, not `git`, per CLAUDE.md).
-- [nix/basic-usage.md](../tools-documentation/nix/basic-usage.md) — `nix flake check` is the verification authority here.
+- [rust/style.md](../lore/rust/style.md) — Rust object style (authoritative for this crate).
+- [substack/basic-usage.md](../lore/substack/basic-usage.md) — our own CLI's user-facing surface.
+- [jj/basic-usage.md](../lore/jj/basic-usage.md) — VCS loop (this repo uses `jj`, not `git`, per CLAUDE.md).
+- [nix/basic-usage.md](../lore/nix/basic-usage.md) — `nix flake check` is the verification authority here.
