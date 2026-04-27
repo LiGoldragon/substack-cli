@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use substack_cli::prosemirror::{ImageRef, ImageSource};
+use substack_cli::prosemirror::{ImageRef, ImageSource, LinkRef, LinkSource};
 
 #[test]
 fn parses_prefix_image_syntax_with_tail() {
@@ -80,5 +80,34 @@ fn no_base_dir_leaves_relative_path_unchanged() {
     match ImageSource::classify("./img.png", None) {
         ImageSource::Local(path) => assert_eq!(path, PathBuf::from("./img.png")),
         other => panic!("expected Local, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_prefix_link_syntax_with_tail() {
+    let input = "[manual](./Plasma_Recycling_Manual.md) rest";
+    let parsed = LinkRef::parse_prefix(input).unwrap();
+    assert_eq!(parsed.link().label(), "manual");
+    assert_eq!(parsed.link().href(), "./Plasma_Recycling_Manual.md");
+    assert_eq!(&input[parsed.consumed()..], " rest");
+}
+
+#[test]
+fn link_source_resolves_local_markdown_and_fragment() {
+    let base = Path::new("/posts/bookofsol/water");
+    match LinkSource::classify("../diet/Ambrosian_Diet.md#closing", Some(base)) {
+        LinkSource::Local { path, fragment } => {
+            assert_eq!(path, PathBuf::from("/posts/bookofsol/water/../diet/Ambrosian_Diet.md"));
+            assert_eq!(fragment.as_deref(), Some("closing"));
+        }
+        other => panic!("expected Local, got {other:?}"),
+    }
+}
+
+#[test]
+fn anchor_only_link_is_treated_as_remote_passthrough() {
+    match LinkSource::classify("#section", None) {
+        LinkSource::Remote(raw) => assert_eq!(raw, "#section"),
+        other => panic!("expected Remote, got {other:?}"),
     }
 }

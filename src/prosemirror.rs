@@ -331,6 +331,114 @@ fn pad_or_truncate(mut cells: Vec<String>, width: usize) -> Vec<String> {
     cells
 }
 
+/// A Markdown link reference: `[label](href)`.
+#[derive(Debug, Clone)]
+pub struct LinkRef {
+    label: String,
+    href: String,
+}
+
+/// Result of `LinkRef::parse_prefix` — the parsed link plus the number of
+/// bytes consumed from the input (i.e. the offset past the closing `)`).
+pub struct ParsedLinkRef {
+    link: LinkRef,
+    consumed: usize,
+}
+
+impl ParsedLinkRef {
+    pub fn link(&self) -> &LinkRef {
+        &self.link
+    }
+
+    pub fn consumed(&self) -> usize {
+        self.consumed
+    }
+
+    pub fn into_link(self) -> LinkRef {
+        self.link
+    }
+}
+
+impl LinkRef {
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn href(&self) -> &str {
+        &self.href
+    }
+
+    pub fn source(&self, base_dir: Option<&std::path::Path>) -> LinkSource {
+        LinkSource::classify(&self.href, base_dir)
+    }
+
+    /// Parse `[label](href)` starting at the beginning of `input`.
+    /// `input` must begin with `[`; returns the link and consumed byte count.
+    pub fn parse_prefix(input: &str) -> Option<ParsedLinkRef> {
+        let after_open = input.strip_prefix('[')?;
+        let label_end = after_open.find("](")?;
+        let label = &after_open[..label_end];
+        if label.contains('\n') || label.contains('[') {
+            return None;
+        }
+        let after_label = &after_open[label_end + 2..];
+        let href_end = after_label.find(')')?;
+        let href = &after_label[..href_end];
+        if href.contains('\n') {
+            return None;
+        }
+        let consumed = "[".len() + label_end + "](".len() + href_end + ")".len();
+        Some(ParsedLinkRef {
+            link: Self {
+                label: label.to_string(),
+                href: href.to_string(),
+            },
+            consumed,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LinkSource {
+    Remote(String),
+    Local {
+        path: std::path::PathBuf,
+        fragment: Option<String>,
+    },
+}
+
+impl LinkSource {
+    pub fn classify(raw: &str, base_dir: Option<&std::path::Path>) -> Self {
+        if raw.starts_with("http://")
+            || raw.starts_with("https://")
+            || raw.starts_with("mailto:")
+            || raw.starts_with("tel:")
+            || raw.starts_with("data:")
+            || raw.starts_with('#')
+        {
+            return Self::Remote(raw.to_string());
+        }
+
+        let (path_part, fragment) = match raw.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment.to_string())),
+            None => (raw, None),
+        };
+        let path = std::path::Path::new(path_part);
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            match base_dir {
+                Some(base) if !base.as_os_str().is_empty() => base.join(path),
+                _ => path.to_path_buf(),
+            }
+        };
+        Self::Local {
+            path: resolved,
+            fragment,
+        }
+    }
+}
+
 /// A Markdown image reference: `![alt](src)`.
 #[derive(Debug, Clone)]
 pub struct ImageRef {
@@ -505,38 +613,24 @@ impl<'a> InlineMarkdown<'a> {
     }
 
     fn try_link(&mut self) -> bool {
-        let Some(after_open) = self.remaining.strip_prefix('[') else {
+        let Some(parsed) = LinkRef::parse_prefix(self.remaining) else {
             return false;
         };
-        let Some(label_end) = after_open.find("](") else {
-            return false;
-        };
-        let label = &after_open[..label_end];
-        if label.contains('\n') || label.contains('[') {
-            return false;
-        }
-
-        let after_label = &after_open[label_end + 2..];
-        let Some(href_end) = after_label.find(')') else {
-            return false;
-        };
-        let href = &after_label[..href_end];
-        if href.contains('\n') {
-            return false;
-        }
+        let consumed = parsed.consumed();
+        let link = parsed.into_link();
 
         self.flush_text();
         self.nodes.push(text_node(
-            label,
+            link.label(),
             vec![serde_json::json!({
                 "type": "link",
                 "attrs": {
-                    "href": href,
+                    "href": link.href(),
                     "title": null,
                 }
             })],
         ));
-        self.remaining = &after_label[href_end + 1..];
+        self.remaining = &self.remaining[consumed..];
         true
     }
 

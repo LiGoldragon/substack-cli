@@ -5,6 +5,7 @@ pub mod cli;
 pub mod client;
 pub mod error;
 pub mod image_file;
+pub mod local_post_manifest;
 pub mod prosemirror;
 pub mod table_image;
 pub mod types;

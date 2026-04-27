@@ -50,6 +50,9 @@ fn parses_post_update() {
         "42",
         "--file-path",
         "post.md",
+        "--publish-linked-files",
+        "--link-manifest",
+        "links.json",
     ])
     .unwrap();
 
@@ -57,6 +60,8 @@ fn parses_post_update() {
         RootCommand::Post(PostCommand::Update(arguments)) => {
             assert_eq!(arguments.post_id, 42);
             assert_eq!(arguments.file_path.as_deref(), Some("post.md"));
+            assert!(arguments.publish_linked_files);
+            assert_eq!(arguments.link_manifest.as_deref(), Some("links.json"));
         }
         _ => panic!("expected post update command"),
     }

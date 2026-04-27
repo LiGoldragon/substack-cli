@@ -6,8 +6,10 @@ use crate::cli::{
 use crate::client::Client;
 use crate::error::Error;
 use crate::image_file::{ImageFile, Mime};
+use crate::local_post_manifest::{LocalPostManifestFile, PublishedLocalPost};
 use crate::prosemirror::{
-    FrontmatterSplit, ImageRef, ImageSource, Markdown, ProseMirrorDoc, Table,
+    FrontmatterSplit, ImageRef, ImageSource, LinkRef, LinkSource, Markdown, ProseMirrorDoc,
+    Table,
 };
 use crate::table_image::TableImage;
 use crate::types::{
@@ -225,26 +227,32 @@ impl Application {
             subtitle: arguments.subtitle,
             cover_image: arguments.cover_image,
         };
-        let prepared_post = self.prepare_post(request).await?;
-
-        let user_id = self.client.user_id().await?;
-        let draft = self.client.create_draft(user_id).await?;
-        let update = DraftUpdate {
-            draft_title: prepared_post.title.clone(),
-            draft_subtitle: prepared_post.subtitle,
-            draft_body: serde_json::to_string(&prepared_post.body)?,
-            cover_image: prepared_post.cover_image_url,
-        };
-
-        self.client.update_draft(&draft.id, &update).await?;
+        let mut manifest = self.local_post_manifest(
+            arguments.link_manifest.as_deref(),
+            request.source.base_dir.as_deref(),
+        )?;
+        let mut active_sources = request.source.active_sources()?;
+        let prepared_post = self
+            .prepare_post(
+                request,
+                &mut manifest,
+                arguments.publish_linked_files,
+                &mut active_sources,
+            )
+            .await?;
 
         if draft_only {
+            let user_id = self.client.user_id().await?;
+            let draft = self.client.create_draft(user_id).await?;
+            self.client
+                .update_draft(&draft.id, &prepared_post.draft_update()?)
+                .await?;
             println!("Draft saved: {} (id: {})", prepared_post.title, draft.id);
         } else {
-            let post = self.client.publish(&draft.id).await?;
-            let slug = post.slug.unwrap_or_default();
-            println!("Published: {}", prepared_post.title);
-            println!("https://{}/p/{slug}", self.hostname());
+            let published_post = self.publish_new_post(prepared_post).await?;
+            self.record_published_post(&mut manifest, &published_post)?;
+            println!("Published: {}", published_post.title);
+            println!("{}", published_post.canonical_url(self.hostname()));
         }
 
         Ok(())
@@ -257,28 +265,37 @@ impl Application {
             subtitle: arguments.subtitle,
             cover_image: arguments.cover_image,
         };
-        let prepared_post = self.prepare_post(request).await?;
-
+        let mut manifest = self.local_post_manifest(
+            arguments.link_manifest.as_deref(),
+            request.source.base_dir.as_deref(),
+        )?;
+        let mut active_sources = request.source.active_sources()?;
+        let prepared_post = self
+            .prepare_post(
+                request,
+                &mut manifest,
+                arguments.publish_linked_files,
+                &mut active_sources,
+            )
+            .await?;
         let post_id = PostId::from(arguments.post_id);
-        let update = DraftUpdate {
-            draft_title: prepared_post.title.clone(),
-            draft_subtitle: prepared_post.subtitle,
-            draft_body: serde_json::to_string(&prepared_post.body)?,
-            cover_image: prepared_post.cover_image_url,
-        };
-
-        self.client.update_draft(&post_id, &update).await?;
-        let post = self.client.publish(&post_id).await?;
-        let slug = post.slug.unwrap_or_default();
+        let published_post = self.publish_existing_post(post_id, prepared_post).await?;
+        self.record_published_post(&mut manifest, &published_post)?;
         println!(
             "Updated post {}: {}",
-            arguments.post_id, prepared_post.title
+            arguments.post_id, published_post.title
         );
-        println!("https://{}/p/{slug}", self.hostname());
+        println!("{}", published_post.canonical_url(self.hostname()));
         Ok(())
     }
 
-    async fn prepare_post(&self, request: PreparePostRequest) -> Result<PreparedPost, Error> {
+    async fn prepare_post(
+        &self,
+        request: PreparePostRequest,
+        manifest: &mut LocalPostManifestFile,
+        publish_linked_files: bool,
+        active_sources: &mut Vec<PathBuf>,
+    ) -> Result<PreparedPost, Error> {
         let PreparePostRequest {
             source,
             title,
@@ -300,6 +317,15 @@ impl Application {
         let body = self
             .upload_inline_images(&body, source.base_dir.as_deref())
             .await?;
+        let body = self
+            .rewrite_local_article_links(
+                &body,
+                source.base_dir.as_deref(),
+                manifest,
+                publish_linked_files,
+                active_sources,
+            )
+            .await?;
         let body = Markdown::from(body).to_prosemirror();
 
         let cover_image_url = match cover_image {
@@ -312,7 +338,195 @@ impl Application {
             subtitle,
             body,
             cover_image_url,
+            source_path: source.file_path,
         })
+    }
+
+    async fn rewrite_local_article_links(
+        &self,
+        markdown: &str,
+        base_dir: Option<&Path>,
+        manifest: &mut LocalPostManifestFile,
+        publish_linked_files: bool,
+        active_sources: &mut Vec<PathBuf>,
+    ) -> Result<String, Error> {
+        let mut out = String::with_capacity(markdown.len());
+        let mut remaining = markdown;
+
+        while let Some(start) = remaining.find('[') {
+            out.push_str(&remaining[..start]);
+            let tail = &remaining[start..];
+
+            if start > 0 && remaining.as_bytes()[start - 1] == b'!' {
+                out.push('[');
+                remaining = &tail[1..];
+                continue;
+            }
+
+            let Some(parsed) = LinkRef::parse_prefix(tail) else {
+                out.push('[');
+                remaining = &tail[1..];
+                continue;
+            };
+
+            let consumed = parsed.consumed();
+            let link = parsed.into_link();
+
+            match link.source(base_dir) {
+                LinkSource::Remote(_) => {
+                    out.push_str(&format!("[{}]({})", link.label(), link.href()));
+                }
+                LinkSource::Local { path, fragment } => {
+                    let is_markdown = path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(|extension| extension.eq_ignore_ascii_case("md"))
+                        .unwrap_or(false);
+
+                    if !is_markdown {
+                        out.push_str(&format!("[{}]({})", link.label(), link.href()));
+                    } else {
+                        let linked_post = match manifest.published_post(&path)? {
+                            Some(post) => post,
+                            None if publish_linked_files => {
+                                self.publish_linked_file(&path, manifest, active_sources)
+                                    .await?
+                            }
+                            None => {
+                                return Err(Error::LinkedFileNotPublished {
+                                    path: path.display().to_string(),
+                                });
+                            }
+                        };
+                        let mut href = linked_post.canonical_url(self.hostname());
+                        if let Some(fragment) = fragment {
+                            if !fragment.is_empty() {
+                                href.push('#');
+                                href.push_str(&fragment);
+                            }
+                        }
+                        out.push_str(&format!("[{}]({href})", link.label()));
+                    }
+                }
+            }
+
+            remaining = &tail[consumed..];
+        }
+
+        out.push_str(remaining);
+        Ok(out)
+    }
+
+    async fn publish_linked_file(
+        &self,
+        path: &Path,
+        manifest: &mut LocalPostManifestFile,
+        active_sources: &mut Vec<PathBuf>,
+    ) -> Result<PublishedLocalPost, Error> {
+        let canonical_path = path.canonicalize().map_err(|_| Error::MissingLinkedFile {
+            path: path.display().to_string(),
+        })?;
+
+        if let Some(existing) = manifest.published_post(&canonical_path)? {
+            return Ok(existing);
+        }
+
+        if let Some(index) = active_sources
+            .iter()
+            .position(|active| active == &canonical_path)
+        {
+            let mut cycle: Vec<String> = active_sources[index..]
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            cycle.push(canonical_path.display().to_string());
+            return Err(Error::LinkedFileCycle {
+                cycle: cycle.join(" -> "),
+            });
+        }
+
+        active_sources.push(canonical_path.clone());
+        let result = async {
+            let canonical_path_string = canonical_path.to_string_lossy().to_string();
+            let source = PostSource::from_body_or_file(None, Some(&canonical_path_string))?;
+            let request = PreparePostRequest {
+                source,
+                title: None,
+                subtitle: None,
+                cover_image: None,
+            };
+            let prepared_post =
+                Box::pin(self.prepare_post(request, manifest, true, active_sources)).await?;
+            let published_post = self.publish_new_post(prepared_post).await?;
+            let linked_post = manifest.record_post(
+                &canonical_path,
+                published_post.id.clone(),
+                published_post.slug.clone(),
+            )?;
+            manifest.save()?;
+            Ok(linked_post)
+        }
+        .await;
+        active_sources.pop();
+        result
+    }
+
+    async fn publish_new_post(&self, prepared_post: PreparedPost) -> Result<PublishedPost, Error> {
+        let user_id = self.client.user_id().await?;
+        let draft = self.client.create_draft(user_id).await?;
+        let title = prepared_post.title.clone();
+        self.client
+            .update_draft(&draft.id, &prepared_post.draft_update()?)
+            .await?;
+        let post = self.client.publish(&draft.id).await?;
+        Ok(PublishedPost {
+            id: draft.id,
+            title,
+            slug: post.slug.unwrap_or_default(),
+            source_path: prepared_post.source_path,
+        })
+    }
+
+    async fn publish_existing_post(
+        &self,
+        post_id: PostId,
+        prepared_post: PreparedPost,
+    ) -> Result<PublishedPost, Error> {
+        let title = prepared_post.title.clone();
+        self.client
+            .update_draft(&post_id, &prepared_post.draft_update()?)
+            .await?;
+        let post = self.client.publish(&post_id).await?;
+        Ok(PublishedPost {
+            id: post_id,
+            title,
+            slug: post.slug.unwrap_or_default(),
+            source_path: prepared_post.source_path,
+        })
+    }
+
+    fn record_published_post(
+        &self,
+        manifest: &mut LocalPostManifestFile,
+        published_post: &PublishedPost,
+    ) -> Result<(), Error> {
+        if let Some(source_path) = published_post.source_path.as_deref() {
+            manifest.record_post(
+                source_path,
+                published_post.id.clone(),
+                published_post.slug.clone(),
+            )?;
+            manifest.save()?;
+        }
+        Ok(())
+    }
+
+    fn local_post_manifest(
+        &self,
+        manifest_path: Option<&str>,
+        base_dir: Option<&Path>,
+    ) -> Result<LocalPostManifestFile, Error> {
+        LocalPostManifestFile::discover(manifest_path, base_dir)
     }
 
     fn post_body_source(&self, arguments: &PostCreateArguments) -> Result<PostSource, Error> {
@@ -428,6 +642,18 @@ struct PreparedPost {
     subtitle: Option<String>,
     body: ProseMirrorDoc,
     cover_image_url: Option<ImageUrl>,
+    source_path: Option<PathBuf>,
+}
+
+impl PreparedPost {
+    fn draft_update(&self) -> Result<DraftUpdate, Error> {
+        Ok(DraftUpdate {
+            draft_title: self.title.clone(),
+            draft_subtitle: self.subtitle.clone(),
+            draft_body: serde_json::to_string(&self.body)?,
+            cover_image: self.cover_image_url.clone(),
+        })
+    }
 }
 
 struct PreparePostRequest {
@@ -440,6 +666,7 @@ struct PreparePostRequest {
 struct PostSource {
     markdown: String,
     base_dir: Option<PathBuf>,
+    file_path: Option<PathBuf>,
 }
 
 impl PostSource {
@@ -448,15 +675,46 @@ impl PostSource {
             (Some(body), None) => Ok(Self {
                 markdown: body.to_string(),
                 base_dir: None,
+                file_path: None,
             }),
             (None, Some(path)) => Ok(Self {
                 markdown: std::fs::read_to_string(path)?,
                 base_dir: Path::new(path).parent().map(Path::to_path_buf),
+                file_path: Some(PathBuf::from(path)),
             }),
             (Some(_), Some(_)) => Err(Error::Usage(
                 "provide --body or --file-path, not both".into(),
             )),
             (None, None) => Err(Error::Usage("--body or --file-path is required".into())),
         }
+    }
+
+    fn active_sources(&self) -> Result<Vec<PathBuf>, Error> {
+        match self.canonical_file_path()? {
+            Some(path) => Ok(vec![path]),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn canonical_file_path(&self) -> Result<Option<PathBuf>, Error> {
+        match self.file_path.as_deref() {
+            Some(path) => Ok(Some(path.canonicalize().map_err(|_| Error::MissingLinkedFile {
+                path: path.display().to_string(),
+            })?)),
+            None => Ok(None),
+        }
+    }
+}
+
+struct PublishedPost {
+    id: PostId,
+    title: String,
+    slug: String,
+    source_path: Option<PathBuf>,
+}
+
+impl PublishedPost {
+    fn canonical_url(&self, hostname: &Hostname) -> String {
+        format!("https://{}/p/{}", hostname, self.slug)
     }
 }

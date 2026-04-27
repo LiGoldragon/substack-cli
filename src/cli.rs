@@ -114,6 +114,10 @@ pub struct PostCreateArguments {
     pub file_path: Option<String>,
     #[arg(long)]
     pub cover_image: Option<String>,
+    #[arg(long)]
+    pub link_manifest: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub publish_linked_files: bool,
     #[arg(long, action = ArgAction::SetTrue)]
     pub draft: bool,
 }
@@ -131,6 +135,10 @@ pub struct PostUpdateArguments {
     pub file_path: Option<String>,
     #[arg(long)]
     pub cover_image: Option<String>,
+    #[arg(long)]
+    pub link_manifest: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub publish_linked_files: bool,
 }
 
 #[derive(Debug, Args)]
@@ -154,4 +162,3 @@ pub struct PostGetArguments {
 pub struct PostDeleteArguments {
     pub post_id: u64,
 }
-

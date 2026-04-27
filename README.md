@@ -74,6 +74,15 @@ Update and republish an existing post:
 substack post update 123456789 --file-path ./article.md
 ```
 
+Publish a post while rewriting repo-local Markdown article links through the
+manifest, auto-publishing missing linked files first:
+
+```sh
+substack post create \
+  --file-path ./article.md \
+  --publish-linked-files
+```
+
 List recent posts:
 
 ```sh
@@ -116,6 +125,45 @@ Supported body conversion is intentionally small:
 - Hard line breaks using a trailing backslash
 - Inline links: `[label](url)`
 - `*italic*`, `**bold**`, and `***bold italic***`
+
+### Local article links
+
+When a Markdown file contains a local link to another Markdown file, such as:
+
+```md
+[Plasma Recycling Manual](./Plasma_Recycling_Manual.md)
+```
+
+the CLI can rewrite that link to the canonical Substack post URL instead of
+publishing the raw `.md` path.
+
+Behavior:
+
+- The CLI looks up published local files in `.substack-posts.json` at the
+  workspace root by default (or the nearest ancestor containing `.jj` or
+  `.git`).
+- Override the manifest location with `--link-manifest /path/to/manifest.json`.
+- If a local `.md` link is found and the target already exists in the manifest,
+  the link is rewritten to `https://<hostname>/p/<slug>`.
+- If a local `.md` link is found and the target is missing from the manifest,
+  the command fails by default with a clear error.
+- Pass `--publish-linked-files` to publish missing local `.md` dependencies
+  first, record them in the manifest, and then rewrite the links to their
+  canonical Substack URLs.
+
+Manifest shape:
+
+```json
+{
+  "posts": [
+    {
+      "source_path": "water/Keep_the_Plasma.md",
+      "post_id": 195628661,
+      "slug": "keep-the-plasma"
+    }
+  ]
+}
+```
 
 ## Images
 

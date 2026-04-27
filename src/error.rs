@@ -29,6 +29,18 @@ pub enum Error {
     #[error("unsupported image format: {extension}")]
     UnsupportedImageFormat { extension: String },
 
+    #[error("local markdown link target does not exist: {path}")]
+    MissingLinkedFile { path: String },
+
+    #[error("local markdown link target is outside the manifest root {manifest_root}: {path}")]
+    LinkedFileOutsideManifestRoot { path: String, manifest_root: String },
+
+    #[error("local markdown link target is not published: {path}; publish it first or rerun with --publish-linked-files")]
+    LinkedFileNotPublished { path: String },
+
+    #[error("cyclic local markdown links: {cycle}")]
+    LinkedFileCycle { cycle: String },
+
     #[error("API {status}: {body}")]
     Api { status: u16, body: String },
 }
