@@ -472,62 +472,130 @@ fn strip_blockquote_marker(line: &str) -> &str {
     rest
 }
 
-/// Parse inline markdown: **bold**, *italic*.
-fn inline_nodes(text: &str) -> Vec<Value> {
-    let mut nodes = Vec::new();
-    let mut current = String::new();
-    let mut i = 0;
+struct InlineMarkdown<'a> {
+    remaining: &'a str,
+    current: String,
+    nodes: Vec<Value>,
+}
 
-    while i < text.len() {
-        if text.as_bytes()[i] == b'*' {
-            let start = i;
-            while i < text.len() && text.as_bytes()[i] == b'*' {
-                i += 1;
-            }
-            let stars = i - start;
-            let pattern: String = std::iter::repeat('*').take(stars).collect();
-
-            if let Some(end) = text[i..].find(&pattern) {
-                flush_text(&mut current, &mut nodes);
-
-                let inner = &text[i..i + end];
-                let mut marks = Vec::new();
-                if stars >= 2 {
-                    marks.push(serde_json::json!({ "type": "bold" }));
-                }
-                if stars == 1 || stars == 3 {
-                    marks.push(serde_json::json!({ "type": "italic" }));
-                }
-
-                let mut node = serde_json::json!({ "type": "text", "text": inner });
-                if !marks.is_empty() {
-                    node["marks"] = Value::Array(marks);
-                }
-                nodes.push(node);
-                i += end + stars;
-            } else {
-                current.push_str(&pattern);
-            }
-        } else {
-            let ch = text[i..].chars().next().unwrap();
-            current.push(ch);
-            i += ch.len_utf8();
+impl<'a> InlineMarkdown<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            remaining: text,
+            current: String::new(),
+            nodes: Vec::new(),
         }
     }
 
-    flush_text(&mut current, &mut nodes);
+    fn into_nodes(mut self) -> Vec<Value> {
+        while !self.remaining.is_empty() {
+            if self.try_link() || self.try_emphasis() {
+                continue;
+            }
+            self.push_next_char();
+        }
 
-    if nodes.is_empty() {
-        nodes.push(serde_json::json!({ "type": "text", "text": text }));
+        self.flush_text();
+
+        if self.nodes.is_empty() {
+            self.nodes.push(text_node(self.remaining, Vec::new()));
+        }
+
+        self.nodes
     }
 
-    nodes
-}
+    fn try_link(&mut self) -> bool {
+        let Some(after_open) = self.remaining.strip_prefix('[') else {
+            return false;
+        };
+        let Some(label_end) = after_open.find("](") else {
+            return false;
+        };
+        let label = &after_open[..label_end];
+        if label.contains('\n') || label.contains('[') {
+            return false;
+        }
 
-fn flush_text(buf: &mut String, nodes: &mut Vec<Value>) {
-    if !buf.is_empty() {
-        nodes.push(serde_json::json!({ "type": "text", "text": *buf }));
-        buf.clear();
+        let after_label = &after_open[label_end + 2..];
+        let Some(href_end) = after_label.find(')') else {
+            return false;
+        };
+        let href = &after_label[..href_end];
+        if href.contains('\n') {
+            return false;
+        }
+
+        self.flush_text();
+        self.nodes.push(text_node(
+            label,
+            vec![serde_json::json!({
+                "type": "link",
+                "attrs": {
+                    "href": href,
+                    "title": null,
+                }
+            })],
+        ));
+        self.remaining = &after_label[href_end + 1..];
+        true
+    }
+
+    fn try_emphasis(&mut self) -> bool {
+        if !self.remaining.starts_with('*') {
+            return false;
+        }
+
+        let mut i = 0;
+        while i < self.remaining.len() && self.remaining.as_bytes()[i] == b'*' {
+            i += 1;
+        }
+        let stars = i;
+        let pattern: String = std::iter::repeat('*').take(stars).collect();
+
+        let Some(end) = self.remaining[i..].find(&pattern) else {
+            return false;
+        };
+
+        self.flush_text();
+
+        let inner = &self.remaining[i..i + end];
+        let mut marks = Vec::new();
+        if stars >= 2 {
+            marks.push(serde_json::json!({ "type": "bold" }));
+        }
+        if stars == 1 || stars == 3 {
+            marks.push(serde_json::json!({ "type": "italic" }));
+        }
+
+        self.nodes.push(text_node(inner, marks));
+        self.remaining = &self.remaining[i + end + stars..];
+        true
+    }
+
+    fn push_next_char(&mut self) {
+        let ch = self.remaining.chars().next().unwrap();
+        self.current.push(ch);
+        self.remaining = &self.remaining[ch.len_utf8()..];
+    }
+
+    fn flush_text(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+        self.nodes.push(text_node(&self.current, Vec::new()));
+        self.current.clear();
     }
 }
 
+fn text_node(text: &str, marks: Vec<Value>) -> Value {
+    let mut node = serde_json::json!({ "type": "text", "text": text });
+    if !marks.is_empty() {
+        node["marks"] = Value::Array(marks);
+    }
+    node
+}
+
+/// Parse inline markdown: **bold**, *italic*, [links](https://example.com).
+fn inline_nodes(text: &str) -> Vec<Value> {
+    InlineMarkdown::new(text).into_nodes()
+}

@@ -54,6 +54,38 @@ fn image_with_trailing_text_is_not_treated_as_image_block() {
 }
 
 #[test]
+fn inline_markdown_link_becomes_link_mark() {
+    let doc = render("See [Plasma Recycling Manual](./Plasma_Recycling_Manual.md).");
+    let content = doc["content"].as_array().unwrap();
+    let paragraph = &content[0]["content"];
+
+    assert_eq!(paragraph[0]["text"], "See ");
+    assert_eq!(paragraph[1]["text"], "Plasma Recycling Manual");
+    assert_eq!(paragraph[1]["marks"][0]["type"], "link");
+    assert_eq!(
+        paragraph[1]["marks"][0]["attrs"]["href"],
+        "./Plasma_Recycling_Manual.md"
+    );
+    assert_eq!(paragraph[2]["text"], ".");
+}
+
+#[test]
+fn inline_markdown_link_renders_inside_blockquote() {
+    let doc = render("> Consult [the manual](https://example.com/manual).");
+    let content = doc["content"].as_array().unwrap();
+    let quote = &content[0]["content"][0]["content"];
+
+    assert_eq!(quote[0]["text"], "Consult ");
+    assert_eq!(quote[1]["text"], "the manual");
+    assert_eq!(quote[1]["marks"][0]["type"], "link");
+    assert_eq!(
+        quote[1]["marks"][0]["attrs"]["href"],
+        "https://example.com/manual"
+    );
+    assert_eq!(quote[2]["text"], ".");
+}
+
+#[test]
 fn blockquote_spacer_lines_do_not_render_literal_markers() {
     let doc = render("> first\n> >\n> second");
     let content = doc["content"].as_array().unwrap();

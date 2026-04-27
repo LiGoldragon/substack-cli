@@ -114,6 +114,7 @@ Supported body conversion is intentionally small:
 - Paragraphs
 - Blockquotes
 - Hard line breaks using a trailing backslash
+- Inline links: `[label](url)`
 - `*italic*`, `**bold**`, and `***bold italic***`
 
 ## Images
