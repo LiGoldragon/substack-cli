@@ -23,3 +23,10 @@ Tool usage references live at [~/git/lore/](../lore/):
 - [substack/basic-usage.md](../lore/substack/basic-usage.md) — our own CLI's user-facing surface.
 - [jj/basic-usage.md](../lore/jj/basic-usage.md) — VCS loop (this repo uses `jj`, not `git`, per CLAUDE.md).
 - [nix/basic-usage.md](../lore/nix/basic-usage.md) — `nix flake check` is the verification authority here.
+
+## Protos estate status
+
+Protos estate scope: out of scope
+Stack: not applicable
+Role: standalone CLI
+This is scope metadata, not a stack.
